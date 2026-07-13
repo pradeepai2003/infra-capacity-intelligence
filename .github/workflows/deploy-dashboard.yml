@@ -1,0 +1,36 @@
+name: Deploy Dashboard
+
+# Optional workflow: triggers a Power BI Service dataset refresh via REST API
+# after new data has been committed. Requires POWERBI_* secrets to be set;
+# safe to leave disabled (workflow_dispatch only) until Power BI Service
+# credentials are available.
+
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["Data Pipeline"]
+    types: [completed]
+
+jobs:
+  refresh-powerbi-dataset:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Trigger Power BI dataset refresh
+        env:
+          POWERBI_WORKSPACE_ID: ${{ secrets.POWERBI_WORKSPACE_ID }}
+          POWERBI_DATASET_ID: ${{ secrets.POWERBI_DATASET_ID }}
+          POWERBI_ACCESS_TOKEN: ${{ secrets.POWERBI_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$POWERBI_ACCESS_TOKEN" ]; then
+            echo "POWERBI_ACCESS_TOKEN not set - skipping refresh (this step is a no-op until Power BI Service is connected)."
+            exit 0
+          fi
+          curl -X POST \
+            "https://api.powerbi.com/v1.0/myorg/groups/${POWERBI_WORKSPACE_ID}/datasets/${POWERBI_DATASET_ID}/refreshes" \
+            -H "Authorization: Bearer ${POWERBI_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json"

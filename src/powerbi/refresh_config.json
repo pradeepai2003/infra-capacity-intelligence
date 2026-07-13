@@ -1,0 +1,22 @@
+{
+  "description": "Configuration for connecting Power BI Desktop to the pipeline's exported CSVs and, optionally, scheduling a Power BI Service refresh via the REST API once real Azure data replaces the synthetic set.",
+  "data_source": {
+    "type": "local_csv_folder",
+    "path": "src/powerbi/",
+    "files": [
+      "utilization_overview.csv",
+      "recommendations.csv",
+      "risk_summary.csv"
+    ]
+  },
+  "refresh": {
+    "mode": "manual",
+    "note": "Switch to 'scheduled' and fill in workspace/dataset IDs (see config/.env.example) once the dataset is published to Power BI Service."
+  },
+  "recommended_visuals": {
+    "infrastructure_health_overview": "utilization_overview.csv -> card + gauge visuals per resource_type",
+    "forecast_trend_graphs": "utilization_overview.csv -> line chart, filtered by date, 4wk/12wk bookmarks",
+    "risk_indicators": "risk_summary.csv -> stacked bar chart by resource_type/risk_level",
+    "recommendation_summaries": "recommendations.csv -> table visual with ai_narrative column"
+  }
+}

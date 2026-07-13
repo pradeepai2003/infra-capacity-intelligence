@@ -1,0 +1,49 @@
+{
+  "name": "infra-capacity-cleansing-pipeline",
+  "tags": {
+    "project": "infra-capacity-intelligence",
+    "env": "dev"
+  },
+  "job_clusters": [
+    {
+      "job_cluster_key": "cleansing_cluster",
+      "new_cluster": {
+        "spark_version": "14.3.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 1,
+        "autotermination_minutes": 30,
+        "data_security_mode": "SINGLE_USER"
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "task_key": "ingest_raw_data",
+      "job_cluster_key": "cleansing_cluster",
+      "notebook_task": { "notebook_path": "/Repos/infra-capacity-intelligence/src/databricks/notebooks/01_ingest_raw_data" }
+    },
+    {
+      "task_key": "data_cleansing",
+      "depends_on": [{ "task_key": "ingest_raw_data" }],
+      "job_cluster_key": "cleansing_cluster",
+      "notebook_task": { "notebook_path": "/Repos/infra-capacity-intelligence/src/databricks/notebooks/02_data_cleansing" }
+    },
+    {
+      "task_key": "aggregation_trend_analysis",
+      "depends_on": [{ "task_key": "data_cleansing" }],
+      "job_cluster_key": "cleansing_cluster",
+      "notebook_task": { "notebook_path": "/Repos/infra-capacity-intelligence/src/databricks/notebooks/03_aggregation_trend_analysis" }
+    },
+    {
+      "task_key": "time_series_prep",
+      "depends_on": [{ "task_key": "aggregation_trend_analysis" }],
+      "job_cluster_key": "cleansing_cluster",
+      "notebook_task": { "notebook_path": "/Repos/infra-capacity-intelligence/src/databricks/notebooks/04_time_series_prep" }
+    }
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 0 3 * * ?",
+    "timezone_id": "Asia/Kolkata",
+    "pause_status": "UNPAUSED"
+  }
+}

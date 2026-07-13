@@ -1,0 +1,38 @@
+data_generation:
+  start_date: "2025-01-01"
+  num_days: 365
+  num_compute_clusters: 5
+  num_storage_systems: 4
+  num_network_links: 3
+  random_seed: 42
+
+paths:
+  raw_data_dir: "data/raw"
+  interim_data_dir: "data/interim"
+  processed_data_dir: "data/processed"
+  seeded_scenarios_dir: "data/seeded_scenarios"
+  powerbi_export_dir: "src/powerbi"
+
+forecasting:
+  horizons_weeks: [4, 12]
+  models:
+    - linear_regression
+    - prophet
+
+thresholds:
+  storage_utilization_critical_pct: 90
+  storage_utilization_warning_pct: 75
+  compute_underutilization_pct: 30
+  compute_overutilization_pct: 85
+  network_latency_warning_ms: 150
+
+recommendation_engine:
+  provider: "gemini"        # options: gemini, ollama, template_fallback
+  gemini_model: "gemini-1.5-flash"
+  ollama_model: "llama3"
+  ollama_host: "http://localhost:11434"
+
+seeded_scenarios:
+  - capacity_shortfall
+  - chronic_waste
+  - seasonal_spike

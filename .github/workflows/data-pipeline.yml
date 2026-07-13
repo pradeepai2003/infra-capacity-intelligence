@@ -1,0 +1,54 @@
+name: Data Pipeline
+
+on:
+  schedule:
+    # Runs daily at 03:30 UTC (09:00 IST) - after the Databricks cleansing job
+    - cron: "30 3 * * *"
+  workflow_dispatch: {}  # allows manual trigger from the Actions tab
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "config/**"
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run full pipeline (generate -> clean -> forecast -> recommend -> export)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OLLAMA_HOST: ${{ secrets.OLLAMA_HOST }}
+        run: |
+          python -m src.pipeline.run_pipeline
+
+      - name: Upload Power BI datasets as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: powerbi-datasets
+          path: src/powerbi/*.csv
+          retention-days: 14
+
+      - name: Commit refreshed datasets back to repo
+        if: github.event_name != 'pull_request'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/powerbi/*.csv
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: refresh Power BI datasets [automated]"
+          git push
