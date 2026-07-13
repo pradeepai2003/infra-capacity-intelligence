@@ -34,7 +34,7 @@ def test_add_trend_indicators_adds_expected_columns():
 def test_process_compute_trends_end_to_end():
     df = pd.DataFrame(
         {
-            "timestamp": pd.date_range("2025-01-01", periods=48, freq="h"),
+            "timestamp": pd.date_range("2025-01-01", periods=48, freq="H"),
             "cluster_id": ["c1"] * 48,
             "cpu_utilization_pct": [50.0] * 48,
             "memory_utilization_pct": [40.0] * 48,

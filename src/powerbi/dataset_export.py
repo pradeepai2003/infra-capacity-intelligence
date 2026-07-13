@@ -10,9 +10,10 @@ schedule (or a manual "Refresh" click) picks up new files from there.
 from __future__ import annotations
 
 import logging
-import os
 
 import pandas as pd
+
+from src.pipeline.io_utils import save_and_log
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,6 @@ def export_for_powerbi(
     recommendations_df: pd.DataFrame,
     output_dir: str = "src/powerbi",
 ) -> None:
-    os.makedirs(output_dir, exist_ok=True)
-
     # 1. Utilization overview (compute + storage + network unioned into one long table)
     compute = trends["compute"].rename(
         columns={"cluster_id": "resource_id", "cluster_utilization_pct": "utilization_pct"}
@@ -42,10 +41,10 @@ def export_for_powerbi(
         [compute[common_cols], storage[common_cols], network[common_cols]],
         ignore_index=True,
     )
-    overview.to_csv(f"{output_dir}/utilization_overview.csv", index=False)
+    save_and_log(overview, f"{output_dir}/utilization_overview.csv", "Power BI utilization overview")
 
     # 2. Recommendations + AI narratives (drives the "Recommendation summaries" panel)
-    recommendations_df.to_csv(f"{output_dir}/recommendations.csv", index=False)
+    save_and_log(recommendations_df, f"{output_dir}/recommendations.csv", "Power BI recommendations table")
 
     # 3. Risk indicators summary (counts by risk level, for KPI cards)
     risk_summary = (
@@ -53,6 +52,4 @@ def export_for_powerbi(
         if not recommendations_df.empty
         else pd.DataFrame(columns=["resource_type", "risk_level", "count"])
     )
-    risk_summary.to_csv(f"{output_dir}/risk_summary.csv", index=False)
-
-    logger.info("Power BI datasets exported to %s", output_dir)
+    save_and_log(risk_summary, f"{output_dir}/risk_summary.csv", "Power BI risk summary")

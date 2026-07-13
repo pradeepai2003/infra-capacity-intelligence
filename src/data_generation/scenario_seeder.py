@@ -12,8 +12,14 @@ of the full randomly generated dataset.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
+
+from src.pipeline.io_utils import save_and_log
+
+logger = logging.getLogger(__name__)
 
 
 def seed_capacity_shortfall(start_date: str = "2025-01-01", num_days: int = 90) -> pd.DataFrame:
@@ -84,7 +90,7 @@ def generate_all_scenarios(output_dir: str = "data/seeded_scenarios") -> dict[st
     results = {}
     for name, generator_fn in SCENARIO_GENERATORS.items():
         df = generator_fn()
-        df.to_csv(f"{output_dir}/{name}.csv", index=False)
+        save_and_log(df, f"{output_dir}/{name}.csv", f"Seeded scenario '{name}'")
         results[name] = df
     return results
 

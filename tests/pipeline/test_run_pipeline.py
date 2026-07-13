@@ -54,7 +54,7 @@ def test_full_pipeline_runs_end_to_end(small_cfg):
     raw = step_generate_data(small_cfg)
     assert all(len(df) > 0 for df in raw.values())
 
-    trends = step_clean_and_trend(raw)
+    trends = step_clean_and_trend(raw, small_cfg)
     assert all(len(df) > 0 for df in trends.values())
 
     forecasts = step_forecast(trends, small_cfg)

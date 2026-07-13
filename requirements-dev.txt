@@ -1,4 +1,4 @@
-pytest
-pytest-cov
-flake8
-black
+pytest==8.2.0
+pytest-cov==5.0.0
+flake8==7.0.0
+black==24.4.2
