@@ -56,7 +56,7 @@ def clean_all(interim_dir: str = "data/interim", processed_dir: str = "data/proc
 
 # COMMAND ----------
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     cleaned = clean_all()
     for name, df in cleaned.items():
         print(f"Cleaned {name}: {len(df)} rows")

@@ -56,7 +56,7 @@ def generate_storage_metrics(
     return df
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     df = generate_storage_metrics(start_date="2025-01-01", num_days=365, num_systems=4)
     df.to_csv("data/raw/storage_metrics.csv", index=False)
     print(f"Generated {len(df)} storage metric rows -> data/raw/storage_metrics.csv")

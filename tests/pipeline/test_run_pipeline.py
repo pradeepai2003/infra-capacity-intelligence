@@ -10,6 +10,8 @@ import pandas as pd
 import pytest
 
 from src.pipeline.run_pipeline import (
+    load_config,
+    run,
     step_clean_and_trend,
     step_forecast,
     step_generate_data,
@@ -65,3 +67,32 @@ def test_full_pipeline_runs_end_to_end(small_cfg):
     assert len(recommendations_df) > 0
     assert "ai_narrative" in recommendations_df.columns
     assert recommendations_df["ai_narrative"].apply(lambda x: len(x) > 0).all()
+
+
+def test_load_config_reads_real_config_file():
+    cfg = load_config("config/config.yaml")
+    assert "data_generation" in cfg
+    assert "paths" in cfg
+    assert "forecasting" in cfg
+    assert "thresholds" in cfg
+    assert "recommendation_engine" in cfg
+    assert cfg["forecasting"]["horizons_weeks"] == [4, 12]
+
+
+def test_run_executes_full_pipeline_end_to_end(small_cfg, monkeypatch):
+    """Exercises the top-level run() orchestrator (not just the individual steps),
+    by monkeypatching load_config() to return a small, fast, tmp-path-scoped config.
+    """
+    import src.pipeline.run_pipeline as pipeline_module
+
+    monkeypatch.setattr(pipeline_module, "load_config", lambda path="config/config.yaml": small_cfg)
+
+    run()
+
+    powerbi_dir = small_cfg["paths"]["powerbi_export_dir"]
+    assert os.path.exists(f"{powerbi_dir}/utilization_overview.csv")
+    assert os.path.exists(f"{powerbi_dir}/recommendations.csv")
+    assert os.path.exists(f"{powerbi_dir}/risk_summary.csv")
+
+    processed_dir = small_cfg["paths"]["processed_data_dir"]
+    assert os.path.exists(f"{processed_dir}/recommendations.csv")

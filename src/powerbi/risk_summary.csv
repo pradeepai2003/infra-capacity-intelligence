@@ -1,6 +1,0 @@
-resource_type,risk_level,count
-compute,info,3
-compute,warning,2
-network,warning,3
-storage,critical,1
-storage,info,3

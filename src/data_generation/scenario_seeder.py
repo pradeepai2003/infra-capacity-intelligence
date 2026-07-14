@@ -95,7 +95,7 @@ def generate_all_scenarios(output_dir: str = "data/seeded_scenarios") -> dict[st
     return results
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     generated = generate_all_scenarios()
     for name, df in generated.items():
         print(f"Seeded scenario '{name}': {len(df)} rows -> data/seeded_scenarios/{name}.csv")

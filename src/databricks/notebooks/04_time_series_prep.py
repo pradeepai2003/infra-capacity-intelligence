@@ -43,7 +43,7 @@ def prepare_all(processed_dir: str = "data/processed") -> dict[str, dict[str, pd
 
 # COMMAND ----------
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     prepared = prepare_all()
     for resource_type, series_dict in prepared.items():
         print(f"{resource_type}: prepared {len(series_dict)} time series")
