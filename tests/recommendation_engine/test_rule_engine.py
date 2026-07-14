@@ -43,6 +43,21 @@ def test_evaluate_storage_no_action_when_below_thresholds():
     assert all(r.recommendation_type == RecommendationType.NO_ACTION for r in recs)
 
 
+def test_evaluate_storage_skips_missing_forecast_horizons():
+    # forecast_4wk is None and forecast_12wk is empty -> both should be skipped (continue),
+    # falling through to the "no action" default rather than raising.
+    recs = evaluate_storage(
+        "storage-03",
+        current_util_pct=40,
+        forecast_4wk=None,
+        forecast_12wk=pd.DataFrame(columns=["ds", "yhat"]),
+        critical_threshold=90,
+        warning_threshold=75,
+    )
+    assert len(recs) == 1
+    assert recs[0].recommendation_type == RecommendationType.NO_ACTION
+
+
 def test_evaluate_compute_flags_chronic_waste():
     chronic_low_util = pd.Series([15.0] * 30)  # 30 days at 15% -> way below threshold
     rec = evaluate_compute("cluster-01", chronic_low_util, underutilization_threshold=30, chronic_days_threshold=21)

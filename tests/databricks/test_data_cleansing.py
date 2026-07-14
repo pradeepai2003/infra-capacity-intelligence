@@ -64,3 +64,51 @@ def test_clean_network_drops_negative_latency(dirty_network_df):
     assert (cleaned["latency_ms"] >= 0).all()
     assert (cleaned["throughput_mbps"] >= 0).all()
     assert len(cleaned) == 1
+
+
+def test_clean_all_reads_interim_and_writes_processed(tmp_path):
+    interim_dir = tmp_path / "interim"
+    processed_dir = tmp_path / "processed"
+    interim_dir.mkdir()
+    processed_dir.mkdir()
+
+    compute_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2025-01-01", "2025-01-02"]),
+            "cluster_id": ["c1", "c1"],
+            "cpu_utilization_pct": [40.0, 45.0],
+            "memory_utilization_pct": [35.0, 42.0],
+            "cluster_utilization_pct": [38.0, 44.0],
+        }
+    )
+    storage_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2025-01-01", "2025-01-02"]),
+            "storage_id": ["s1", "s1"],
+            "disk_used_gb": [500.0, 520.0],
+            "disk_total_gb": [1000.0, 1000.0],
+            "disk_utilization_pct": [50.0, 52.0],
+            "io_utilization_pct": [30.0, 32.0],
+        }
+    )
+    network_df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2025-01-01", "2025-01-02"]),
+            "link_id": ["n1", "n1"],
+            "bandwidth_mbps": [1000, 1000],
+            "throughput_mbps": [300.0, 310.0],
+            "latency_ms": [20.0, 22.0],
+        }
+    )
+
+    compute_df.to_csv(interim_dir / "compute_ingested.csv", index=False)
+    storage_df.to_csv(interim_dir / "storage_ingested.csv", index=False)
+    network_df.to_csv(interim_dir / "network_ingested.csv", index=False)
+
+    result = cleansing.clean_all(interim_dir=str(interim_dir), processed_dir=str(processed_dir))
+
+    assert set(result.keys()) == {"compute", "storage", "network"}
+    assert (processed_dir / "compute_cleaned.csv").exists()
+    assert (processed_dir / "storage_cleaned.csv").exists()
+    assert (processed_dir / "network_cleaned.csv").exists()
+    assert len(result["compute"]) == 2

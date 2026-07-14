@@ -210,5 +210,5 @@ def run() -> None:
     logger.info("\nPipeline complete. %d total recommendations generated.\n", len(recommendations_df))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     run()

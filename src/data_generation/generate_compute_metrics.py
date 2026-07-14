@@ -68,7 +68,7 @@ def generate_compute_metrics(
     return df
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     df = generate_compute_metrics(start_date="2025-01-01", num_days=365, num_clusters=5)
     df.to_csv("data/raw/compute_metrics.csv", index=False)
     print(f"Generated {len(df)} compute metric rows -> data/raw/compute_metrics.csv")

@@ -62,7 +62,7 @@ def generate_network_metrics(
     return df
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     df = generate_network_metrics(start_date="2025-01-01", num_days=365, num_links=3)
     df.to_csv("data/raw/network_metrics.csv", index=False)
     print(f"Generated {len(df)} network metric rows -> data/raw/network_metrics.csv")

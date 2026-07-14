@@ -53,7 +53,7 @@ def process_network_trends(df: pd.DataFrame) -> pd.DataFrame:
 
 # COMMAND ----------
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     compute = pd.read_csv("data/processed/compute_cleaned.csv", parse_dates=["timestamp"])
     storage = pd.read_csv("data/processed/storage_cleaned.csv", parse_dates=["timestamp"])
     network = pd.read_csv("data/processed/network_cleaned.csv", parse_dates=["timestamp"])
