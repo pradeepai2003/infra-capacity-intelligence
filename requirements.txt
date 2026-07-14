@@ -1,13 +1,20 @@
-pandas==2.2.2
-numpy==1.26.4
-scikit-learn==1.4.2
-prophet==1.1.5
-pyyaml==6.0.1
-requests==2.31.0
-azure-functions==1.20.0
+pandas>=2.2.3
+numpy>=1.26.4
+scikit-learn>=1.4.2
+prophet>=1.1.5
+pyyaml>=6.0.1
+requests>=2.31.0
+azure-functions>=1.20.0
+
+# Pinned as exact versions previously; switched to minimum-version bounds
+# (">=") so pip resolves whichever release actually has a prebuilt wheel
+# for your installed Python version. Exact pins on pandas/numpy in particular
+# will fail on newer Python releases (e.g. 3.13) that predate that pin,
+# forcing pip to compile from source -- which requires a full C/C++ build
+# toolchain (Meson + MSVC Build Tools on Windows) that most machines don't have.
 
 # Uncomment once real Azure Monitor / Databricks connections are wired up:
-# azure-identity==1.16.1
-# azure-monitor-query==1.4.0
-# azure-storage-blob==12.20.0
-# databricks-sdk==0.28.0
+# azure-identity>=1.16.1
+# azure-monitor-query>=1.4.0
+# azure-storage-blob>=12.20.0
+# databricks-sdk>=0.28.0
