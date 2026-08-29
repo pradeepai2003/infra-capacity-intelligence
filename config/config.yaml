@@ -22,7 +22,7 @@ paths:
   # When set, the same dated snapshot is also copied there, and your local
   # OneDrive desktop client syncs it to the cloud automatically -- no API
   # keys or Azure app registration needed.
-  onedrive_dir: ""
+  onedrive_dir: "C:\Users\pradeep.kumar\OneDrive - psiog.com>"
   # Where the CI-generated test report/coverage files live, if present
   # (produced by a separate `pytest ... > test-report.txt` step). Snapshot
   # creation looks here and includes them if found; skipped otherwise.
