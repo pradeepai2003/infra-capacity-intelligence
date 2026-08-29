@@ -12,6 +12,24 @@ paths:
   processed_data_dir: "data/processed"
   seeded_scenarios_dir: "data/seeded_scenarios"
   powerbi_export_dir: "src/powerbi"
+  # Where dated run snapshots are written (bundles this run's raw/processed/
+  # powerbi data + test report into one folder named "S3-P-07 - <date>").
+  snapshot_dir: "runs"
+  # Optional: absolute path to a OneDrive-synced folder on THIS machine.
+  # Leave blank in CI (cloud runners have no OneDrive access) -- only set
+  # this when running locally, e.g. on Windows:
+  #   onedrive_dir: "C:/Users/pradeep.kumar/OneDrive/pSiddhi3.0"
+  # When set, the same dated snapshot is also copied there, and your local
+  # OneDrive desktop client syncs it to the cloud automatically -- no API
+  # keys or Azure app registration needed.
+  onedrive_dir: ""
+  # Where the CI-generated test report/coverage files live, if present
+  # (produced by a separate `pytest ... > test-report.txt` step). Snapshot
+  # creation looks here and includes them if found; skipped otherwise.
+  test_report_file: "test-report.txt"
+  coverage_xml_file: "coverage.xml"
+
+topic_id: "S3-P-07"
 
 forecasting:
   horizons_weeks: [4, 12]
@@ -27,7 +45,7 @@ thresholds:
   network_latency_warning_ms: 150
 
 recommendation_engine:
-  provider: "gemini"        # options: gemini, ollama, template_fallback
+  provider: "gemini" # options: gemini, ollama, template_fallback
   gemini_model: "gemini-1.5-flash"
   ollama_model: "llama3"
   ollama_host: "http://localhost:11434"

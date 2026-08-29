@@ -22,6 +22,7 @@ from src.pipeline.run_pipeline import (
 @pytest.fixture
 def small_cfg(tmp_path):
     return {
+        "topic_id": "S3-P-07",
         "data_generation": {
             "start_date": "2025-01-01",
             "num_days": 45,  # >30 so trend indicators + forecasts have enough history
@@ -36,6 +37,10 @@ def small_cfg(tmp_path):
             "processed_data_dir": str(tmp_path / "processed"),
             "seeded_scenarios_dir": str(tmp_path / "seeded_scenarios"),
             "powerbi_export_dir": str(tmp_path / "powerbi"),
+            "snapshot_dir": str(tmp_path / "runs"),
+            "onedrive_dir": "",
+            "test_report_file": str(tmp_path / "test-report-that-does-not-exist.txt"),
+            "coverage_xml_file": str(tmp_path / "coverage-that-does-not-exist.xml"),
         },
         "forecasting": {"horizons_weeks": [4, 12]},
         "thresholds": {
@@ -50,8 +55,16 @@ def small_cfg(tmp_path):
 
 
 def test_full_pipeline_runs_end_to_end(small_cfg):
-    for d in small_cfg["paths"].values():
-        os.makedirs(d, exist_ok=True)
+    dir_keys = [
+        "raw_data_dir",
+        "interim_data_dir",
+        "processed_data_dir",
+        "seeded_scenarios_dir",
+        "powerbi_export_dir",
+        "snapshot_dir",
+    ]
+    for key in dir_keys:
+        os.makedirs(small_cfg["paths"][key], exist_ok=True)
 
     raw = step_generate_data(small_cfg)
     assert all(len(df) > 0 for df in raw.values())
@@ -96,3 +109,10 @@ def test_run_executes_full_pipeline_end_to_end(small_cfg, monkeypatch):
 
     processed_dir = small_cfg["paths"]["processed_data_dir"]
     assert os.path.exists(f"{processed_dir}/recommendations.csv")
+
+    from datetime import datetime
+
+    snapshot_dir = small_cfg["paths"]["snapshot_dir"]
+    expected_folder = f"S3-P-07 - {datetime.now().strftime('%Y-%m-%d')}"
+    assert os.path.isdir(os.path.join(snapshot_dir, expected_folder))
+    assert os.path.exists(os.path.join(snapshot_dir, expected_folder, "powerbi", "recommendations.csv"))

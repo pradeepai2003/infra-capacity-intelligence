@@ -4,12 +4,18 @@ on:
   schedule:
     # Runs daily at 03:30 UTC (09:00 IST) - after the Databricks cleansing job
     - cron: "30 3 * * *"
-  workflow_dispatch: {}  # allows manual trigger from the Actions tab
+  workflow_dispatch: {} # allows manual trigger from the Actions tab
   push:
     branches: [main]
     paths:
       - "src/**"
       - "config/**"
+
+# Required for the "Commit refreshed datasets back to repo" step below.
+# Without this, the default GITHUB_TOKEN is read-only and `git push` fails
+# with a 403, even if your repo's own Settings allow it -- both need to agree.
+permissions:
+  contents: write
 
 jobs:
   run-pipeline:
@@ -28,23 +34,35 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run full pipeline (generate -> clean -> forecast -> recommend -> export)
+      - name: Run test suite and save report (for evidence + snapshot bundling)
+        run: |
+          python -m pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml -v \
+            | tee test-report.txt
+
+      - name: Run full pipeline (generate -> clean -> forecast -> recommend -> export -> snapshot)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OLLAMA_HOST: ${{ secrets.OLLAMA_HOST }}
         run: |
           python -m src.pipeline.run_pipeline
 
-      - name: Upload Power BI datasets as build artifact
+      - name: Find today's dated snapshot folder
+        id: snapshot
+        run: |
+          FOLDER=$(ls -d "runs/S3-P-07 - "* | tail -n 1)
+          echo "folder=$FOLDER" >> "$GITHUB_OUTPUT"
+          echo "Snapshot folder: $FOLDER"
+
+      - name: Upload dated snapshot (data + test report) as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: powerbi-datasets
-          path: src/powerbi/*.csv
-          retention-days: 14
+          name: ${{ steps.snapshot.outputs.folder }}
+          path: ${{ steps.snapshot.outputs.folder }}
+          retention-days: 30
 
-      - name: Commit refreshed datasets back to repo
+      - name: Commit refreshed Power BI datasets back to repo
         if: github.event_name != 'pull_request'
         run: |
           git config user.name "github-actions[bot]"

@@ -1,0 +1,13 @@
+resource_id,resource_type,recommendation_type,risk_level,current_value,forecasted_value,forecast_horizon_weeks,details,ai_narrative
+storage-01,storage,increase_storage_capacity,critical,99.5,99.48699546650471,4,{'threshold': 90},storage-01 is projected to reach 99.5 within 4 weeks based on current trends (risk level: critical). Recommended action: increase storage capacity.
+storage-02,storage,no_action,info,58.72,58.72,0,{},storage-02 is currently operating within normal thresholds (58.7%). No action is required at this time.
+storage-03,storage,no_action,info,62.3,62.3,0,{},storage-03 is currently operating within normal thresholds (62.3%). No action is required at this time.
+storage-04,storage,no_action,info,52.74,52.74,0,{},storage-04 is currently operating within normal thresholds (52.7%). No action is required at this time.
+cluster-01,compute,downsize_underutilized_compute,warning,16.738965753424658,16.738965753424658,0,{'days_below_threshold': 365},cluster-01 is projected to reach 16.7 based on current trends (risk level: warning). Recommended action: downsize underutilized compute.
+cluster-02,compute,no_action,info,80.95092123287671,80.95092123287671,0,{},cluster-02 is currently operating within normal thresholds (81.0%). No action is required at this time.
+cluster-03,compute,no_action,info,71.41943607305937,71.41943607305937,0,{},cluster-03 is currently operating within normal thresholds (71.4%). No action is required at this time.
+cluster-04,compute,downsize_underutilized_compute,warning,16.01427397260274,16.01427397260274,0,{'days_below_threshold': 365},cluster-04 is projected to reach 16.0 based on current trends (risk level: warning). Recommended action: downsize underutilized compute.
+cluster-05,compute,no_action,info,83.27525228310502,83.27525228310502,0,{},cluster-05 is currently operating within normal thresholds (83.3%). No action is required at this time.
+network-01,network,enable_temporary_autoscaling,warning,48.33257312159116,100.0,0,{'spike_days': 14},network-01 is projected to reach 100.0 based on current trends (risk level: warning). Recommended action: enable temporary autoscaling.
+network-02,network,enable_temporary_autoscaling,warning,53.18560236355811,100.0,0,{'spike_days': 14},network-02 is projected to reach 100.0 based on current trends (risk level: warning). Recommended action: enable temporary autoscaling.
+network-03,network,enable_temporary_autoscaling,warning,56.46304580252175,100.0,0,{'spike_days': 14},network-03 is projected to reach 100.0 based on current trends (risk level: warning). Recommended action: enable temporary autoscaling.

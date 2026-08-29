@@ -31,6 +31,11 @@ src/powerbi/*.csv.bak
 *.log
 pipeline.log
 
+# Dated run snapshots (uploaded as CI artifacts / mirrored to OneDrive locally,
+# not committed to git -- would bloat repo history with daily CSV dumps)
+runs/
+test-report.txt
+
 # OS/editor
 .DS_Store
 .vscode/settings.json

@@ -31,6 +31,7 @@ from src.data_generation.generate_storage_metrics import generate_storage_metric
 from src.data_generation.scenario_seeder import generate_all_scenarios
 from src.forecasting.forecast_runner import run_forecast_for_all
 from src.pipeline.io_utils import save_and_log
+from src.pipeline.snapshot import create_dated_snapshot
 from src.powerbi.dataset_export import export_for_powerbi
 from src.recommendation_engine.ai_narrative_generator import generate_narrative
 from src.recommendation_engine.recommendation_schema import recommendations_to_dataframe
@@ -68,7 +69,7 @@ def _banner(step_text: str) -> None:
 
 
 def step_generate_data(cfg: dict) -> dict[str, pd.DataFrame]:
-    _banner("STEP 1/5: Generating synthetic data")
+    _banner("STEP 1/6: Generating synthetic data")
     gen_cfg = cfg["data_generation"]
     raw_dir = cfg["paths"]["raw_data_dir"]
 
@@ -94,7 +95,7 @@ def step_generate_data(cfg: dict) -> dict[str, pd.DataFrame]:
 
 
 def step_clean_and_trend(raw: dict[str, pd.DataFrame], cfg: dict) -> dict[str, pd.DataFrame]:
-    _banner("STEP 2/5: Cleansing + trend analysis (Databricks-style)")
+    _banner("STEP 2/6: Cleansing + trend analysis (Databricks-style)")
     processed_dir = cfg["paths"]["processed_data_dir"]
 
     compute_clean = clean_compute(raw["compute"])
@@ -119,7 +120,7 @@ def step_clean_and_trend(raw: dict[str, pd.DataFrame], cfg: dict) -> dict[str, p
 
 
 def step_forecast(trends: dict[str, pd.DataFrame], cfg: dict) -> dict:
-    _banner("STEP 3/5: Forecasting (Linear Regression + Prophet)")
+    _banner("STEP 3/6: Forecasting (Linear Regression + Prophet)")
     horizons = cfg["forecasting"]["horizons_weeks"]
 
     compute_series = prepare_series(trends["compute"], "cluster_id", "date", "cluster_utilization_pct")
@@ -145,7 +146,7 @@ def step_forecast(trends: dict[str, pd.DataFrame], cfg: dict) -> dict:
 
 
 def step_recommend(trends: dict[str, pd.DataFrame], forecasts: dict, cfg: dict) -> pd.DataFrame:
-    _banner("STEP 4/5: Generating recommendations + AI narratives")
+    _banner("STEP 4/6: Generating recommendations + AI narratives")
     thresholds = cfg["thresholds"]
     provider = cfg["recommendation_engine"]["provider"]
     all_recs = []
@@ -196,16 +197,27 @@ def step_recommend(trends: dict[str, pd.DataFrame], forecasts: dict, cfg: dict) 
 
 def run() -> None:
     cfg = load_config()
-    for d in cfg["paths"].values():
-        os.makedirs(d, exist_ok=True)
+    dir_keys = [
+        "raw_data_dir",
+        "interim_data_dir",
+        "processed_data_dir",
+        "seeded_scenarios_dir",
+        "powerbi_export_dir",
+        "snapshot_dir",
+    ]
+    for key in dir_keys:
+        os.makedirs(cfg["paths"][key], exist_ok=True)
 
     raw = step_generate_data(cfg)
     trends = step_clean_and_trend(raw, cfg)
     forecasts = step_forecast(trends, cfg)
     recommendations_df = step_recommend(trends, forecasts, cfg)
 
-    _banner("STEP 5/5: Exporting Power BI datasets")
+    _banner("STEP 5/6: Exporting Power BI datasets")
     export_for_powerbi(trends, recommendations_df, cfg["paths"]["powerbi_export_dir"])
+
+    _banner("STEP 6/6: Creating dated run snapshot")
+    create_dated_snapshot(cfg)
 
     logger.info("\nPipeline complete. %d total recommendations generated.\n", len(recommendations_df))
 
