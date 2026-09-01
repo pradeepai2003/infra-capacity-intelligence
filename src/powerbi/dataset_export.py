@@ -1,10 +1,13 @@
 """
 Exports the final, dashboard-ready datasets for Power BI Desktop.
 
-Power BI Desktop reads flat files (CSV/Parquet) directly via "Get Data",
-so this step just needs to write clean, well-typed, denormalized tables --
-one per dashboard concern -- into src/powerbi/. Power BI's own refresh
-schedule (or a manual "Refresh" click) picks up new files from there.
+Four CSVs are produced:
+  - mac_utilization_overview.csv  -> per-Mac, per-resource-type utilization over time
+                                      (drives the 8 individual per-Mac visual pages)
+  - recommendations.csv            -> per-(mac, resource) recommendations + AI narrative
+  - equalization_summary.csv       -> fleet-wide rebalancing recommendations + AI narrative
+                                      (drives the final "Recommendation Dashboard" page)
+  - risk_summary.csv               -> recommendation counts by risk level, for KPI cards
 """
 
 from __future__ import annotations
@@ -19,34 +22,22 @@ logger = logging.getLogger(__name__)
 
 
 def export_for_powerbi(
-    trends: dict[str, pd.DataFrame],
+    mac_trends: pd.DataFrame,
     recommendations_df: pd.DataFrame,
+    equalization_df: pd.DataFrame,
     output_dir: str = "src/powerbi",
 ) -> None:
-    # 1. Utilization overview (compute + storage + network unioned into one long table)
-    compute = trends["compute"].rename(
-        columns={"cluster_id": "resource_id", "cluster_utilization_pct": "utilization_pct"}
-    )
-    compute["resource_type"] = "compute"
+    # 1. Per-Mac utilization overview (drives the 8 individual per-Mac pages)
+    overview = mac_trends[["mac_id", "project_name", "resource_type", "date", "utilization_pct"]].copy()
+    save_and_log(overview, f"{output_dir}/mac_utilization_overview.csv", "Power BI per-Mac utilization overview")
 
-    storage = trends["storage"].rename(columns={"storage_id": "resource_id", "disk_utilization_pct": "utilization_pct"})
-    storage["resource_type"] = "storage"
-
-    network = trends["network"].rename(columns={"link_id": "resource_id"})
-    network["utilization_pct"] = (network["throughput_mbps"] / network["bandwidth_mbps"] * 100).round(2)
-    network["resource_type"] = "network"
-
-    common_cols = ["resource_id", "resource_type", "date", "utilization_pct"]
-    overview = pd.concat(
-        [compute[common_cols], storage[common_cols], network[common_cols]],
-        ignore_index=True,
-    )
-    save_and_log(overview, f"{output_dir}/utilization_overview.csv", "Power BI utilization overview")
-
-    # 2. Recommendations + AI narratives (drives the "Recommendation summaries" panel)
+    # 2. Per-(mac, resource) recommendations + AI narratives
     save_and_log(recommendations_df, f"{output_dir}/recommendations.csv", "Power BI recommendations table")
 
-    # 3. Risk indicators summary (counts by risk level, for KPI cards)
+    # 3. Fleet-wide equalization recommendations -- the final Recommendation Dashboard input
+    save_and_log(equalization_df, f"{output_dir}/equalization_summary.csv", "Power BI equalization summary")
+
+    # 4. Risk indicators summary (counts by risk level, for KPI cards)
     risk_summary = (
         recommendations_df.groupby(["resource_type", "risk_level"]).size().reset_index(name="count")
         if not recommendations_df.empty

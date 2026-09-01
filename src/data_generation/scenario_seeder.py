@@ -1,13 +1,11 @@
 """
-Injects the three seeded validation scenarios required by the problem statement:
+Injects the three seeded validation scenarios required by the approved
+proposal, reimplemented against the Mac-allocation model:
 
-1. capacity_shortfall  -> a storage system trending toward exhaustion within the forecast horizon
-2. chronic_waste        -> a compute cluster running at ~20% utilization for a long stretch
-3. seasonal_spike       -> a network link with a sharp, temporary demand spike
-
-These scenarios are written out separately so the recommendation engine's
-"Seeded Scenario Validation" step can be tested deterministically, independent
-of the full randomly generated dataset.
+1. capacity_shortfall  -> a Mac's disk allocation trending toward exhaustion
+2. chronic_waste        -> a Mac chronically under-used across all resources
+                           (over-allocated relative to actual need)
+3. seasonal_spike       -> a Mac's CPU spiking during a release/crunch window
 """
 
 from __future__ import annotations
@@ -17,64 +15,84 @@ import logging
 import numpy as np
 import pandas as pd
 
+from src.data_generation.schema import CAPACITY_UNITS
 from src.pipeline.io_utils import save_and_log
 
 logger = logging.getLogger(__name__)
 
 
 def seed_capacity_shortfall(start_date: str = "2025-01-01", num_days: int = 90) -> pd.DataFrame:
-    """A storage system growing fast enough to breach 90% within the 12-week horizon."""
+    """A Mac's disk usage growing fast enough to breach 90% within the 12-week horizon."""
     timestamps = pd.date_range(start=start_date, periods=num_days, freq="D")
-    total_gb = 1000
+    allocated_capacity = 1024  # GB
     used_pct = 55 + np.linspace(0, 40, num_days)  # 55% -> 95% over the window
-    used_gb = used_pct / 100 * total_gb
+    used_capacity = used_pct / 100 * allocated_capacity
 
     return pd.DataFrame(
         {
             "timestamp": timestamps,
-            "storage_id": "storage-shortfall-scenario",
-            "disk_used_gb": used_gb.round(2),
-            "disk_total_gb": total_gb,
-            "disk_utilization_pct": used_pct.round(2),
-            "io_utilization_pct": np.clip(used_pct * 0.4 + 20, 0, 100).round(2),
+            "mac_id": "mac-shortfall-scenario",
+            "project_name": "Project Nova",
+            "resource_type": "disk",
+            "allocated_capacity": allocated_capacity,
+            "used_capacity": used_capacity.round(2),
+            "capacity_unit": CAPACITY_UNITS["disk"],
+            "utilization_pct": used_pct.round(2),
         }
     )
 
 
 def seed_chronic_waste(start_date: str = "2025-01-01", num_days: int = 90) -> pd.DataFrame:
-    """A compute cluster flatlined at ~20% utilization -> should trigger downsize/decommission."""
+    """A Mac flatlined at ~15% utilization across CPU/RAM/disk -- over-allocated,
+    not delivering value for the resources it's been given.
+    """
     timestamps = pd.date_range(start=start_date, periods=num_days * 24, freq="h")
     rng = np.random.default_rng(7)
-    cpu = np.clip(20 + rng.normal(0, 2, len(timestamps)), 1, 100)
-
-    return pd.DataFrame(
-        {
-            "timestamp": timestamps,
-            "cluster_id": "cluster-waste-scenario",
-            "cpu_utilization_pct": cpu.round(2),
-            "memory_utilization_pct": (cpu * 0.9).round(2),
-            "cluster_utilization_pct": cpu.round(2),
-        }
-    )
+    frames = []
+    hw = {"cpu": 12, "ram": 64, "disk": 2048}
+    for resource_type in ("cpu", "ram", "disk"):
+        util = np.clip(15 + rng.normal(0, 2, len(timestamps)), 1, 100)
+        allocated = hw[resource_type]
+        used = np.clip(util / 100 * allocated, 0, allocated)
+        frames.append(
+            pd.DataFrame(
+                {
+                    "timestamp": timestamps,
+                    "mac_id": "mac-waste-scenario",
+                    "project_name": "Project Vega",
+                    "resource_type": resource_type,
+                    "allocated_capacity": allocated,
+                    "used_capacity": used.round(2),
+                    "capacity_unit": CAPACITY_UNITS[resource_type],
+                    "utilization_pct": util.round(2),
+                }
+            )
+        )
+    return pd.concat(frames, ignore_index=True)
 
 
 def seed_seasonal_spike(start_date: str = "2025-01-01", num_days: int = 60) -> pd.DataFrame:
-    """A network link idle most of the time with a sharp 5-day demand spike."""
+    """A Mac's CPU idle most of the time with a sharp 5-day spike (e.g. a release week)."""
     timestamps = pd.date_range(start=start_date, periods=num_days * 24, freq="h")
     n = len(timestamps)
-    throughput_pct = np.full(n, 25.0)
+    util = np.full(n, 25.0)
 
     spike_start, spike_end = int(n * 0.5), int(n * 0.5) + 24 * 5
-    throughput_pct[spike_start:spike_end] = 92.0
+    util[spike_start:spike_end] = 92.0
 
-    bandwidth = 2000
+    allocated_capacity = 10  # cores
+    used_capacity = util / 100 * allocated_capacity
+
     return pd.DataFrame(
         {
             "timestamp": timestamps,
-            "link_id": "network-spike-scenario",
-            "bandwidth_mbps": bandwidth,
-            "throughput_mbps": (throughput_pct / 100 * bandwidth).round(2),
-            "latency_ms": (20 + throughput_pct * 1.2).round(2),
+            "mac_id": "mac-spike-scenario",
+            "project_name": "Project Falcon",
+            "resource_type": "cpu",
+            "allocated_capacity": allocated_capacity,
+            "used_capacity": used_capacity.round(2),
+            "capacity_unit": CAPACITY_UNITS["cpu"],
+            "utilization_pct": util.round(2),
         }
     )
 

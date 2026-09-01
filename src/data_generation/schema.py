@@ -1,37 +1,28 @@
 """
-Shared schema definitions and validation helpers for synthetic infrastructure
-utilization data. Keeping these in one place ensures the Databricks cleansing
-notebooks and the forecasting engine agree on column names/types.
+Shared schema definitions and validation helpers for synthetic Mac resource
+allocation data. Every Mac (mac-01 .. mac-08) is tracked across 3 resource
+types (cpu, ram, disk) as a single long-format table, so the Databricks
+cleansing notebooks, forecasting engine, and recommendation engine all agree
+on one column set.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
-COMPUTE_COLUMNS = [
+MAC_ALLOCATION_COLUMNS = [
     "timestamp",
-    "cluster_id",
-    "cpu_utilization_pct",
-    "memory_utilization_pct",
-    "cluster_utilization_pct",
+    "mac_id",
+    "project_name",
+    "resource_type",
+    "allocated_capacity",
+    "used_capacity",
+    "capacity_unit",
+    "utilization_pct",
 ]
 
-STORAGE_COLUMNS = [
-    "timestamp",
-    "storage_id",
-    "disk_used_gb",
-    "disk_total_gb",
-    "disk_utilization_pct",
-    "io_utilization_pct",
-]
-
-NETWORK_COLUMNS = [
-    "timestamp",
-    "link_id",
-    "bandwidth_mbps",
-    "throughput_mbps",
-    "latency_ms",
-]
+RESOURCE_TYPES = ("cpu", "ram", "disk")
+CAPACITY_UNITS = {"cpu": "cores", "ram": "GB", "disk": "GB"}
 
 
 class SchemaValidationError(ValueError):
@@ -44,19 +35,15 @@ def validate_columns(df: pd.DataFrame, expected_columns: list[str], name: str) -
         raise SchemaValidationError(f"{name} is missing required columns: {sorted(missing)}")
 
 
-def validate_compute(df: pd.DataFrame) -> None:
-    validate_columns(df, COMPUTE_COLUMNS, "compute metrics")
-    if (df["cpu_utilization_pct"] < 0).any() or (df["cpu_utilization_pct"] > 100).any():
-        raise SchemaValidationError("cpu_utilization_pct out of bounds [0, 100]")
+def validate_mac_allocation(df: pd.DataFrame) -> None:
+    validate_columns(df, MAC_ALLOCATION_COLUMNS, "Mac allocation data")
 
+    if (df["utilization_pct"] < 0).any() or (df["utilization_pct"] > 100).any():
+        raise SchemaValidationError("utilization_pct out of bounds [0, 100]")
 
-def validate_storage(df: pd.DataFrame) -> None:
-    validate_columns(df, STORAGE_COLUMNS, "storage metrics")
-    if (df["disk_used_gb"] > df["disk_total_gb"]).any():
-        raise SchemaValidationError("disk_used_gb cannot exceed disk_total_gb")
+    if (df["used_capacity"] > df["allocated_capacity"]).any():
+        raise SchemaValidationError("used_capacity cannot exceed allocated_capacity")
 
-
-def validate_network(df: pd.DataFrame) -> None:
-    validate_columns(df, NETWORK_COLUMNS, "network metrics")
-    if (df["latency_ms"] < 0).any():
-        raise SchemaValidationError("latency_ms cannot be negative")
+    invalid_types = set(df["resource_type"].unique()) - set(RESOURCE_TYPES)
+    if invalid_types:
+        raise SchemaValidationError(f"Unknown resource_type value(s): {sorted(invalid_types)}")

@@ -1,10 +1,12 @@
 """
 Integration test: runs the full pipeline against a tiny synthetic dataset
-(small num_days/clusters to keep CI fast) and checks that each stage hands
-off valid data to the next, ending with non-empty Power BI export files.
+(small num_days/macs to keep CI fast) and checks that each stage hands off
+valid data to the next, ending with non-empty Power BI export files and a
+dated snapshot.
 """
 
 import os
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -26,9 +28,8 @@ def small_cfg(tmp_path):
         "data_generation": {
             "start_date": "2025-01-01",
             "num_days": 45,  # >30 so trend indicators + forecasts have enough history
-            "num_compute_clusters": 2,
-            "num_storage_systems": 2,
-            "num_network_links": 2,
+            "num_macs": 4,
+            "project_pool": ["Project Atlas", "Project Nova", "Project Orion", "Project Zephyr"],
             "random_seed": 1,
         },
         "paths": {
@@ -44,11 +45,9 @@ def small_cfg(tmp_path):
         },
         "forecasting": {"horizons_weeks": [4, 12]},
         "thresholds": {
-            "storage_utilization_critical_pct": 90,
-            "storage_utilization_warning_pct": 75,
-            "compute_underutilization_pct": 30,
-            "compute_overutilization_pct": 85,
-            "network_latency_warning_ms": 150,
+            "overloaded_utilization_pct": 85,
+            "underloaded_utilization_pct": 30,
+            "equalization_deviation_pct": 20,
         },
         "recommendation_engine": {"provider": "template_fallback"},
     }
@@ -66,20 +65,27 @@ def test_full_pipeline_runs_end_to_end(small_cfg):
     for key in dir_keys:
         os.makedirs(small_cfg["paths"][key], exist_ok=True)
 
-    raw = step_generate_data(small_cfg)
-    assert all(len(df) > 0 for df in raw.values())
+    raw_df = step_generate_data(small_cfg)
+    assert len(raw_df) > 0
+    assert set(raw_df["mac_id"].unique()) == {"mac-01", "mac-02", "mac-03", "mac-04"}
 
-    trends = step_clean_and_trend(raw, small_cfg)
-    assert all(len(df) > 0 for df in trends.values())
+    trends = step_clean_and_trend(raw_df, small_cfg)
+    assert len(trends) > 0
+    assert "series_id" in trends.columns
 
     forecasts = step_forecast(trends, small_cfg)
-    assert "compute" in forecasts and "storage" in forecasts and "network" in forecasts
+    assert len(forecasts) > 0
 
-    recommendations_df = step_recommend(trends, forecasts, small_cfg)
+    recommendations_df, equalization_df = step_recommend(trends, forecasts, small_cfg)
     assert isinstance(recommendations_df, pd.DataFrame)
     assert len(recommendations_df) > 0
     assert "ai_narrative" in recommendations_df.columns
     assert recommendations_df["ai_narrative"].apply(lambda x: len(x) > 0).all()
+    assert isinstance(equalization_df, pd.DataFrame)
+
+    processed_dir = small_cfg["paths"]["processed_data_dir"]
+    assert os.path.exists(f"{processed_dir}/recommendations.csv")
+    assert os.path.exists(f"{processed_dir}/equalization_summary.csv")
 
 
 def test_load_config_reads_real_config_file():
@@ -89,6 +95,7 @@ def test_load_config_reads_real_config_file():
     assert "forecasting" in cfg
     assert "thresholds" in cfg
     assert "recommendation_engine" in cfg
+    assert cfg["data_generation"]["num_macs"] == 8
     assert cfg["forecasting"]["horizons_weeks"] == [4, 12]
 
 
@@ -103,14 +110,13 @@ def test_run_executes_full_pipeline_end_to_end(small_cfg, monkeypatch):
     run()
 
     powerbi_dir = small_cfg["paths"]["powerbi_export_dir"]
-    assert os.path.exists(f"{powerbi_dir}/utilization_overview.csv")
+    assert os.path.exists(f"{powerbi_dir}/mac_utilization_overview.csv")
     assert os.path.exists(f"{powerbi_dir}/recommendations.csv")
+    assert os.path.exists(f"{powerbi_dir}/equalization_summary.csv")
     assert os.path.exists(f"{powerbi_dir}/risk_summary.csv")
 
     processed_dir = small_cfg["paths"]["processed_data_dir"]
     assert os.path.exists(f"{processed_dir}/recommendations.csv")
-
-    from datetime import datetime
 
     snapshot_dir = small_cfg["paths"]["snapshot_dir"]
     expected_folder = f"S3-P-07 - {datetime.now().strftime('%Y-%m-%d')}"

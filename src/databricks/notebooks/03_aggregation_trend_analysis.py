@@ -2,9 +2,16 @@
 """
 03_aggregation_trend_analysis
 -------------------------------
-Aggregates cleaned data to daily granularity per resource and computes
-rolling trend indicators (7-day / 30-day moving averages, day-over-day
-growth rate) used both for dashboarding and as forecasting features.
+Aggregates cleaned Mac allocation data to daily granularity per (mac, resource
+type) and computes rolling trend indicators (7-day / 30-day moving averages,
+day-over-day growth rate) used both for dashboarding and as forecasting
+features.
+
+Internally, each (mac_id, resource_type) pair is combined into a single
+"series_id" (e.g. "mac-03__cpu") so the same generic aggregation/trend
+helpers work regardless of how many Macs or resource types exist -- mac_id,
+resource_type, and project_name are split/reattached afterward for
+readability in the output.
 """
 
 # COMMAND ----------
@@ -14,6 +21,12 @@ from __future__ import annotations
 import pandas as pd
 
 # COMMAND ----------
+
+
+def add_series_id(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["series_id"] = df["mac_id"] + "__" + df["resource_type"]
+    return df
 
 
 def aggregate_daily(df: pd.DataFrame, id_col: str, value_cols: list[str]) -> pd.DataFrame:
@@ -32,33 +45,20 @@ def add_trend_indicators(df: pd.DataFrame, id_col: str, value_col: str) -> pd.Da
     return df
 
 
-def process_compute_trends(df: pd.DataFrame) -> pd.DataFrame:
-    daily = aggregate_daily(
-        df, "cluster_id", ["cpu_utilization_pct", "memory_utilization_pct", "cluster_utilization_pct"]
-    )
-    return add_trend_indicators(daily, "cluster_id", "cluster_utilization_pct")
+def process_mac_trends(df: pd.DataFrame) -> pd.DataFrame:
+    df_with_series = add_series_id(df)
+    daily = aggregate_daily(df_with_series, "series_id", ["utilization_pct", "used_capacity", "allocated_capacity"])
+    trended = add_trend_indicators(daily, "series_id", "utilization_pct")
 
-
-def process_storage_trends(df: pd.DataFrame) -> pd.DataFrame:
-    daily = aggregate_daily(
-        df, "storage_id", ["disk_used_gb", "disk_total_gb", "disk_utilization_pct", "io_utilization_pct"]
-    )
-    return add_trend_indicators(daily, "storage_id", "disk_utilization_pct")
-
-
-def process_network_trends(df: pd.DataFrame) -> pd.DataFrame:
-    daily = aggregate_daily(df, "link_id", ["bandwidth_mbps", "throughput_mbps", "latency_ms"])
-    return add_trend_indicators(daily, "link_id", "throughput_mbps")
+    trended[["mac_id", "resource_type"]] = trended["series_id"].str.split("__", expand=True)
+    project_lookup = df.drop_duplicates("mac_id").set_index("mac_id")["project_name"]
+    trended["project_name"] = trended["mac_id"].map(project_lookup)
+    return trended
 
 
 # COMMAND ----------
 
 if __name__ == "__main__":  # pragma: no cover
-    compute = pd.read_csv("data/processed/compute_cleaned.csv", parse_dates=["timestamp"])
-    storage = pd.read_csv("data/processed/storage_cleaned.csv", parse_dates=["timestamp"])
-    network = pd.read_csv("data/processed/network_cleaned.csv", parse_dates=["timestamp"])
-
-    process_compute_trends(compute).to_csv("data/processed/compute_trends.csv", index=False)
-    process_storage_trends(storage).to_csv("data/processed/storage_trends.csv", index=False)
-    process_network_trends(network).to_csv("data/processed/network_trends.csv", index=False)
+    df = pd.read_csv("data/processed/mac_allocation_cleaned.csv", parse_dates=["timestamp"])
+    process_mac_trends(df).to_csv("data/processed/mac_allocation_trends.csv", index=False)
     print("Trend analysis complete.")

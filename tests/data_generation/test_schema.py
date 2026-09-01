@@ -4,10 +4,23 @@ import pytest
 from src.data_generation.schema import (
     SchemaValidationError,
     validate_columns,
-    validate_compute,
-    validate_network,
-    validate_storage,
+    validate_mac_allocation,
 )
+
+
+def _valid_row(**overrides):
+    row = {
+        "timestamp": pd.to_datetime(["2025-01-01"]),
+        "mac_id": ["mac-01"],
+        "project_name": ["Project Atlas"],
+        "resource_type": ["cpu"],
+        "allocated_capacity": [10.0],
+        "used_capacity": [5.0],
+        "capacity_unit": ["cores"],
+        "utilization_pct": [50.0],
+    }
+    row.update(overrides)
+    return pd.DataFrame(row)
 
 
 def test_validate_columns_raises_on_missing_columns():
@@ -21,50 +34,29 @@ def test_validate_columns_passes_when_all_present():
     validate_columns(df, ["a", "b"], "test data")  # should not raise
 
 
-def test_validate_compute_raises_on_out_of_bounds_cpu():
-    df = pd.DataFrame(
-        {
-            "timestamp": pd.to_datetime(["2025-01-01"]),
-            "cluster_id": ["c1"],
-            "cpu_utilization_pct": [150.0],  # out of bounds
-            "memory_utilization_pct": [50.0],
-            "cluster_utilization_pct": [50.0],
-        }
-    )
-    with pytest.raises(SchemaValidationError, match="cpu_utilization_pct out of bounds"):
-        validate_compute(df)
+def test_validate_mac_allocation_passes_on_valid_data():
+    validate_mac_allocation(_valid_row())  # should not raise
 
 
-def test_validate_compute_raises_on_missing_columns():
-    df = pd.DataFrame({"timestamp": pd.to_datetime(["2025-01-01"]), "cluster_id": ["c1"]})
+def test_validate_mac_allocation_raises_on_missing_columns():
+    df = pd.DataFrame({"timestamp": pd.to_datetime(["2025-01-01"]), "mac_id": ["mac-01"]})
     with pytest.raises(SchemaValidationError, match="missing required columns"):
-        validate_compute(df)
+        validate_mac_allocation(df)
 
 
-def test_validate_storage_raises_when_used_exceeds_total():
-    df = pd.DataFrame(
-        {
-            "timestamp": pd.to_datetime(["2025-01-01"]),
-            "storage_id": ["s1"],
-            "disk_used_gb": [1200.0],
-            "disk_total_gb": [1000.0],
-            "disk_utilization_pct": [120.0],
-            "io_utilization_pct": [50.0],
-        }
-    )
+def test_validate_mac_allocation_raises_on_out_of_bounds_utilization():
+    df = _valid_row(utilization_pct=[150.0])
+    with pytest.raises(SchemaValidationError, match="utilization_pct out of bounds"):
+        validate_mac_allocation(df)
+
+
+def test_validate_mac_allocation_raises_when_used_exceeds_allocated():
+    df = _valid_row(used_capacity=[20.0], allocated_capacity=[10.0])
     with pytest.raises(SchemaValidationError, match="cannot exceed"):
-        validate_storage(df)
+        validate_mac_allocation(df)
 
 
-def test_validate_network_raises_on_negative_latency():
-    df = pd.DataFrame(
-        {
-            "timestamp": pd.to_datetime(["2025-01-01"]),
-            "link_id": ["n1"],
-            "bandwidth_mbps": [1000],
-            "throughput_mbps": [500.0],
-            "latency_ms": [-5.0],
-        }
-    )
-    with pytest.raises(SchemaValidationError, match="cannot be negative"):
-        validate_network(df)
+def test_validate_mac_allocation_raises_on_unknown_resource_type():
+    df = _valid_row(resource_type=["gpu"])
+    with pytest.raises(SchemaValidationError, match="Unknown resource_type"):
+        validate_mac_allocation(df)

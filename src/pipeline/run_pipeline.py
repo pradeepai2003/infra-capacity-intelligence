@@ -1,19 +1,18 @@
 """
-End-to-end pipeline orchestrator:
+End-to-end pipeline orchestrator for Psiog's 8-Mac resource allocation
+platform:
 
-  1. Generate synthetic data (or, in future, ingest real Azure Monitor data)
+  1. Generate synthetic Mac allocation data (8 Macs x cpu/ram/disk)
   2. Run the Databricks-style cleansing/aggregation/time-series-prep steps
-  3. Run forecasting (Linear Regression + Prophet) for every resource
-  4. Run the rule engine + AI narrative generator to produce recommendations
-  5. Export the final dataset for Power BI
+  3. Run forecasting (Linear Regression + Prophet) for every (mac, resource) series
+  4. Run the rule engine (per-Mac) + the fleet equalization algorithm (cross-Mac),
+     then generate AI narratives for both via Gemini/Ollama
+  5. Export the final datasets for Power BI (per-Mac pages + the final
+     Recommendation/Equalization dashboard)
+  6. Bundle everything into a dated snapshot folder
 
-Every stage below writes its output to disk immediately AND prints a
-"[SAVED] ..." confirmation line to the terminal (via src.pipeline.io_utils),
-so you can see exactly what file was written, where, and how many rows it
-contains, as each step completes.
-
-Designed to be called both as a script (`python -m src.pipeline.run_pipeline`)
-and from the GitHub Actions data-pipeline workflow.
+Every stage writes its output to disk immediately and logs a
+"[SAVED] ..." confirmation, so progress is visible in real time.
 """
 
 from __future__ import annotations
@@ -25,17 +24,15 @@ import os
 import pandas as pd
 import yaml
 
-from src.data_generation.generate_compute_metrics import generate_compute_metrics
-from src.data_generation.generate_network_metrics import generate_network_metrics
-from src.data_generation.generate_storage_metrics import generate_storage_metrics
+from src.data_generation.generate_mac_allocation_metrics import generate_mac_allocation_metrics
 from src.data_generation.scenario_seeder import generate_all_scenarios
-from src.forecasting.forecast_runner import run_forecast_for_all
 from src.pipeline.io_utils import save_and_log
 from src.pipeline.snapshot import create_dated_snapshot
 from src.powerbi.dataset_export import export_for_powerbi
-from src.recommendation_engine.ai_narrative_generator import generate_narrative
-from src.recommendation_engine.recommendation_schema import recommendations_to_dataframe
-from src.recommendation_engine.rule_engine import evaluate_compute, evaluate_network_spike, evaluate_storage
+from src.recommendation_engine.ai_narrative_generator import generate_equalization_narrative, generate_narrative
+from src.recommendation_engine.recommendation_schema import equalization_to_dataframe, recommendations_to_dataframe
+from src.recommendation_engine.rule_engine import evaluate_equalization, evaluate_mac_resource
+from src.forecasting.forecast_runner import run_forecast_for_all
 
 # Notebook-style modules are prefixed with digits (01_, 02_, ...) to preserve
 # their execution order when browsed in Databricks/VS Code. Python identifiers
@@ -45,14 +42,8 @@ _cleansing = importlib.import_module("src.databricks.notebooks.02_data_cleansing
 _trends = importlib.import_module("src.databricks.notebooks.03_aggregation_trend_analysis")
 _ts_prep = importlib.import_module("src.databricks.notebooks.04_time_series_prep")
 
-clean_compute = _cleansing.clean_compute
-clean_storage = _cleansing.clean_storage
-clean_network = _cleansing.clean_network
-
-process_compute_trends = _trends.process_compute_trends
-process_storage_trends = _trends.process_storage_trends
-process_network_trends = _trends.process_network_trends
-
+clean_mac_allocation = _cleansing.clean_mac_allocation
+process_mac_trends = _trends.process_mac_trends
 prepare_series = _ts_prep.prepare_series
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -68,131 +59,117 @@ def _banner(step_text: str) -> None:
     logger.info("\n%s\n%s\n%s", "=" * 70, step_text, "=" * 70)
 
 
-def step_generate_data(cfg: dict) -> dict[str, pd.DataFrame]:
-    _banner("STEP 1/6: Generating synthetic data")
+def step_generate_data(cfg: dict) -> pd.DataFrame:
+    _banner("STEP 1/6: Generating synthetic Mac allocation data")
     gen_cfg = cfg["data_generation"]
     raw_dir = cfg["paths"]["raw_data_dir"]
 
-    compute = generate_compute_metrics(
-        gen_cfg["start_date"], gen_cfg["num_days"], gen_cfg["num_compute_clusters"], seed=gen_cfg["random_seed"]
+    df = generate_mac_allocation_metrics(
+        start_date=gen_cfg["start_date"],
+        num_days=gen_cfg["num_days"],
+        num_macs=gen_cfg["num_macs"],
+        project_pool=gen_cfg["project_pool"],
+        seed=gen_cfg["random_seed"],
     )
-    save_and_log(compute, f"{raw_dir}/compute_metrics.csv", "Synthetic compute metrics")
-
-    storage = generate_storage_metrics(
-        gen_cfg["start_date"], gen_cfg["num_days"], gen_cfg["num_storage_systems"], seed=gen_cfg["random_seed"]
-    )
-    save_and_log(storage, f"{raw_dir}/storage_metrics.csv", "Synthetic storage metrics")
-
-    network = generate_network_metrics(
-        gen_cfg["start_date"], gen_cfg["num_days"], gen_cfg["num_network_links"], seed=gen_cfg["random_seed"]
-    )
-    save_and_log(network, f"{raw_dir}/network_metrics.csv", "Synthetic network metrics")
+    save_and_log(df, f"{raw_dir}/mac_allocation_metrics.csv", "Synthetic Mac allocation data")
 
     # generate_all_scenarios already saves + logs each of the 3 seeded scenario CSVs
     generate_all_scenarios(cfg["paths"]["seeded_scenarios_dir"])
 
-    return {"compute": compute, "storage": storage, "network": network}
+    return df
 
 
-def step_clean_and_trend(raw: dict[str, pd.DataFrame], cfg: dict) -> dict[str, pd.DataFrame]:
+def step_clean_and_trend(raw_df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     _banner("STEP 2/6: Cleansing + trend analysis (Databricks-style)")
     processed_dir = cfg["paths"]["processed_data_dir"]
 
-    compute_clean = clean_compute(raw["compute"])
-    save_and_log(compute_clean, f"{processed_dir}/compute_cleaned.csv", "Cleaned compute data")
+    cleaned = clean_mac_allocation(raw_df)
+    save_and_log(cleaned, f"{processed_dir}/mac_allocation_cleaned.csv", "Cleaned Mac allocation data")
 
-    storage_clean = clean_storage(raw["storage"])
-    save_and_log(storage_clean, f"{processed_dir}/storage_cleaned.csv", "Cleaned storage data")
+    trends = process_mac_trends(cleaned)
+    save_and_log(trends, f"{processed_dir}/mac_allocation_trends.csv", "Mac allocation trend indicators")
 
-    network_clean = clean_network(raw["network"])
-    save_and_log(network_clean, f"{processed_dir}/network_cleaned.csv", "Cleaned network data")
-
-    compute_trends = process_compute_trends(compute_clean)
-    save_and_log(compute_trends, f"{processed_dir}/compute_trends.csv", "Compute trend indicators")
-
-    storage_trends = process_storage_trends(storage_clean)
-    save_and_log(storage_trends, f"{processed_dir}/storage_trends.csv", "Storage trend indicators")
-
-    network_trends = process_network_trends(network_clean)
-    save_and_log(network_trends, f"{processed_dir}/network_trends.csv", "Network trend indicators")
-
-    return {"compute": compute_trends, "storage": storage_trends, "network": network_trends}
+    return trends
 
 
-def step_forecast(trends: dict[str, pd.DataFrame], cfg: dict) -> dict:
+def step_forecast(trends: pd.DataFrame, cfg: dict) -> dict:
     _banner("STEP 3/6: Forecasting (Linear Regression + Prophet)")
     horizons = cfg["forecasting"]["horizons_weeks"]
 
-    compute_series = prepare_series(trends["compute"], "cluster_id", "date", "cluster_utilization_pct")
-    storage_series = prepare_series(trends["storage"], "storage_id", "date", "disk_utilization_pct")
-    network_series = prepare_series(trends["network"], "link_id", "date", "throughput_mbps")
-
-    forecasts = {
-        "compute": run_forecast_for_all(compute_series, horizons),
-        "storage": run_forecast_for_all(storage_series, horizons),
-        "network": run_forecast_for_all(network_series, horizons),
-        "raw_series": {"compute": compute_series, "storage": storage_series, "network": network_series},
-    }
+    series_by_id = prepare_series(trends, "series_id", "date", "utilization_pct")
+    forecasts = run_forecast_for_all(series_by_id, horizons)
 
     logger.info(
-        "[FORECASTED] %d compute + %d storage + %d network resources, horizons=%s weeks",
-        len(compute_series),
-        len(storage_series),
-        len(network_series),
+        "[FORECASTED] %d Mac x resource-type series, horizons=%s weeks",
+        len(series_by_id),
         horizons,
     )
-
     return forecasts
 
 
-def step_recommend(trends: dict[str, pd.DataFrame], forecasts: dict, cfg: dict) -> pd.DataFrame:
-    _banner("STEP 4/6: Generating recommendations + AI narratives")
+def step_recommend(trends: pd.DataFrame, forecasts: dict, cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    _banner("STEP 4/6: Generating per-Mac recommendations + fleet equalization")
     thresholds = cfg["thresholds"]
     provider = cfg["recommendation_engine"]["provider"]
-    all_recs = []
 
-    for storage_id, group in trends["storage"].groupby("storage_id"):
-        current = float(group["disk_utilization_pct"].iloc[-1])
-        f4 = forecasts["storage"].get(storage_id, {}).get("prophet", {}).get(4)
-        f12 = forecasts["storage"].get(storage_id, {}).get("prophet", {}).get(12)
-        all_recs.extend(
-            evaluate_storage(
-                storage_id,
-                current,
-                f4,
-                f12,
-                thresholds["storage_utilization_critical_pct"],
-                thresholds["storage_utilization_warning_pct"],
-            )
+    # --- Per-(mac, resource_type) recommendations ---
+    per_mac_recs = []
+    for series_id, group in trends.groupby("series_id"):
+        group = group.sort_values("date")
+        mac_id = group["mac_id"].iloc[0]
+        resource_type = group["resource_type"].iloc[0]
+        project_name = group["project_name"].iloc[0]
+
+        f4 = forecasts.get(series_id, {}).get("prophet", {}).get(4)
+        f12 = forecasts.get(series_id, {}).get("prophet", {}).get(12)
+
+        rec = evaluate_mac_resource(
+            mac_id,
+            resource_type,
+            project_name,
+            group["utilization_pct"],
+            forecast_4wk=f4,
+            forecast_12wk=f12,
+            overloaded_threshold=thresholds["overloaded_utilization_pct"],
+            underloaded_threshold=thresholds["underloaded_utilization_pct"],
         )
+        per_mac_recs.append(rec)
 
-    for cluster_id, group in trends["compute"].groupby("cluster_id"):
-        all_recs.append(
-            evaluate_compute(
-                cluster_id,
-                group["cluster_utilization_pct"],
-                thresholds["compute_underutilization_pct"],
-                thresholds["compute_overutilization_pct"],
-            )
-        )
-
-    for link_id, group in trends["network"].groupby("link_id"):
-        throughput_pct = group["throughput_mbps"] / group["throughput_mbps"].max() * 100
-        all_recs.append(evaluate_network_spike(link_id, throughput_pct))
-
-    df = recommendations_to_dataframe(all_recs)
-
-    logger.info("[AI NARRATIVE] generating narratives for %d recommendations via '%s'...", len(all_recs), provider)
-    df["ai_narrative"] = [generate_narrative(r, provider=provider) for r in all_recs]
+    recommendations_df = recommendations_to_dataframe(per_mac_recs)
+    logger.info("[AI NARRATIVE] generating narratives for %d recommendations via '%s'...", len(per_mac_recs), provider)
+    recommendations_df["ai_narrative"] = [generate_narrative(r, provider=provider) for r in per_mac_recs]
 
     processed_dir = cfg["paths"]["processed_data_dir"]
-    save_and_log(df, f"{processed_dir}/recommendations.csv", "AI recommendations")
+    save_and_log(recommendations_df, f"{processed_dir}/recommendations.csv", "Per-Mac recommendations")
 
-    critical_count = int((df["risk_level"] == "critical").sum())
-    warning_count = int((df["risk_level"] == "warning").sum())
-    logger.info("[SUMMARY] %d critical, %d warning recommendation(s) generated", critical_count, warning_count)
+    # --- Fleet-wide equalization, one pass per resource type ---
+    equalization_recs = []
+    latest_date = trends["date"].max()
+    for resource_type, group in trends[trends["date"] == latest_date].groupby("resource_type"):
+        fleet_snapshot = group[["mac_id", "project_name", "utilization_pct"]]
+        equalization_recs.extend(
+            evaluate_equalization(fleet_snapshot, resource_type, thresholds["equalization_deviation_pct"])
+        )
 
-    return df
+    equalization_df = equalization_to_dataframe(equalization_recs)
+    if equalization_recs:
+        equalization_df["ai_narrative"] = [
+            generate_equalization_narrative(r, provider=provider) for r in equalization_recs
+        ]
+    else:
+        equalization_df["ai_narrative"] = []
+    save_and_log(equalization_df, f"{processed_dir}/equalization_summary.csv", "Fleet equalization recommendations")
+
+    critical_count = int((recommendations_df["risk_level"] == "critical").sum()) if not recommendations_df.empty else 0
+    warning_count = int((recommendations_df["risk_level"] == "warning").sum()) if not recommendations_df.empty else 0
+    logger.info(
+        "[SUMMARY] %d critical, %d warning per-Mac recommendation(s); %d fleet-rebalancing suggestion(s)",
+        critical_count,
+        warning_count,
+        len(equalization_recs),
+    )
+
+    return recommendations_df, equalization_df
 
 
 def run() -> None:
@@ -208,18 +185,22 @@ def run() -> None:
     for key in dir_keys:
         os.makedirs(cfg["paths"][key], exist_ok=True)
 
-    raw = step_generate_data(cfg)
-    trends = step_clean_and_trend(raw, cfg)
+    raw_df = step_generate_data(cfg)
+    trends = step_clean_and_trend(raw_df, cfg)
     forecasts = step_forecast(trends, cfg)
-    recommendations_df = step_recommend(trends, forecasts, cfg)
+    recommendations_df, equalization_df = step_recommend(trends, forecasts, cfg)
 
     _banner("STEP 5/6: Exporting Power BI datasets")
-    export_for_powerbi(trends, recommendations_df, cfg["paths"]["powerbi_export_dir"])
+    export_for_powerbi(trends, recommendations_df, equalization_df, cfg["paths"]["powerbi_export_dir"])
 
     _banner("STEP 6/6: Creating dated run snapshot")
     create_dated_snapshot(cfg)
 
-    logger.info("\nPipeline complete. %d total recommendations generated.\n", len(recommendations_df))
+    logger.info(
+        "\nPipeline complete. %d per-Mac recommendations, %d fleet-rebalancing suggestions.\n",
+        len(recommendations_df),
+        len(equalization_df),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -3,9 +3,8 @@ import pandas as pd
 from src.recommendation_engine.rule_engine import (
     RecommendationType,
     RiskLevel,
-    evaluate_compute,
-    evaluate_network_spike,
-    evaluate_storage,
+    evaluate_equalization,
+    evaluate_mac_resource,
 )
 
 
@@ -18,76 +17,104 @@ def _forecast_df(peak_value: float, days: int = 28) -> pd.DataFrame:
     )
 
 
-def test_evaluate_storage_critical_when_forecast_exceeds_critical_threshold():
-    recs = evaluate_storage(
-        "storage-01",
-        current_util_pct=60,
+def test_evaluate_mac_resource_flags_overload_from_current_value():
+    history = pd.Series([90.0] * 10)
+    rec = evaluate_mac_resource("mac-01", "cpu", "Project Atlas", history, overloaded_threshold=85)
+    assert rec.recommendation_type == RecommendationType.INCREASE_ALLOCATION
+    assert rec.risk_level == RiskLevel.CRITICAL
+    assert rec.mac_id == "mac-01"
+    assert rec.project_name == "Project Atlas"
+
+
+def test_evaluate_mac_resource_flags_overload_from_forecast():
+    history = pd.Series([50.0] * 10)  # current is fine
+    rec = evaluate_mac_resource(
+        "mac-02",
+        "disk",
+        "Project Nova",
+        history,
         forecast_4wk=_forecast_df(95),
-        forecast_12wk=_forecast_df(97),
-        critical_threshold=90,
-        warning_threshold=75,
+        overloaded_threshold=85,
     )
-    assert any(r.risk_level == RiskLevel.CRITICAL for r in recs)
-    assert any(r.recommendation_type == RecommendationType.INCREASE_STORAGE for r in recs)
+    assert rec.recommendation_type == RecommendationType.INCREASE_ALLOCATION
+    assert rec.forecasted_value == 95
 
 
-def test_evaluate_storage_no_action_when_below_thresholds():
-    recs = evaluate_storage(
-        "storage-02",
-        current_util_pct=40,
-        forecast_4wk=_forecast_df(50),
-        forecast_12wk=_forecast_df(55),
-        critical_threshold=90,
-        warning_threshold=75,
+def test_evaluate_mac_resource_flags_chronic_underload_as_reduce_allocation():
+    history = pd.Series([15.0] * 30)  # 30 days well below threshold
+    rec = evaluate_mac_resource(
+        "mac-03",
+        "ram",
+        "Project Orion",
+        history,
+        underloaded_threshold=30,
+        chronic_days_threshold=21,
     )
-    assert all(r.recommendation_type == RecommendationType.NO_ACTION for r in recs)
-
-
-def test_evaluate_storage_skips_missing_forecast_horizons():
-    # forecast_4wk is None and forecast_12wk is empty -> both should be skipped (continue),
-    # falling through to the "no action" default rather than raising.
-    recs = evaluate_storage(
-        "storage-03",
-        current_util_pct=40,
-        forecast_4wk=None,
-        forecast_12wk=pd.DataFrame(columns=["ds", "yhat"]),
-        critical_threshold=90,
-        warning_threshold=75,
-    )
-    assert len(recs) == 1
-    assert recs[0].recommendation_type == RecommendationType.NO_ACTION
-
-
-def test_evaluate_compute_flags_chronic_waste():
-    chronic_low_util = pd.Series([15.0] * 30)  # 30 days at 15% -> way below threshold
-    rec = evaluate_compute("cluster-01", chronic_low_util, underutilization_threshold=30, chronic_days_threshold=21)
-    assert rec.recommendation_type in (
-        RecommendationType.DOWNSIZE_COMPUTE,
-        RecommendationType.DECOMMISSION,
-    )
+    assert rec.recommendation_type == RecommendationType.REDUCE_ALLOCATION
     assert rec.risk_level == RiskLevel.WARNING
 
 
-def test_evaluate_compute_flags_overutilization():
-    high_util = pd.Series([92.0] * 10)
-    rec = evaluate_compute("cluster-02", high_util, overutilization_threshold=85)
-    assert rec.recommendation_type == RecommendationType.ENABLE_AUTOSCALING
-    assert rec.risk_level == RiskLevel.CRITICAL
+def test_evaluate_mac_resource_no_action_for_healthy_utilization():
+    history = pd.Series([55.0] * 10)
+    rec = evaluate_mac_resource("mac-04", "cpu", "Project Zephyr", history)
+    assert rec.recommendation_type == RecommendationType.NO_ACTION
+    assert rec.risk_level == RiskLevel.INFO
 
 
-def test_evaluate_compute_no_action_for_healthy_utilization():
-    healthy_util = pd.Series([55.0] * 10)
-    rec = evaluate_compute("cluster-03", healthy_util)
+def test_evaluate_mac_resource_skips_missing_forecast():
+    history = pd.Series([50.0] * 10)
+    rec = evaluate_mac_resource(
+        "mac-05",
+        "disk",
+        "Project Falcon",
+        history,
+        forecast_4wk=None,
+        forecast_12wk=pd.DataFrame(columns=["ds", "yhat"]),
+    )
     assert rec.recommendation_type == RecommendationType.NO_ACTION
 
 
-def test_evaluate_network_spike_detects_spike():
-    spiky = pd.Series([20.0] * 20 + [90.0] * 5)
-    rec = evaluate_network_spike("network-01", spiky, spike_threshold_pct=85, min_spike_days=2)
-    assert rec.recommendation_type == RecommendationType.ENABLE_AUTOSCALING
+def test_evaluate_equalization_pairs_overloaded_with_underloaded():
+    fleet = pd.DataFrame(
+        {
+            "mac_id": ["mac-01", "mac-02", "mac-03", "mac-04"],
+            "project_name": ["Atlas", "Nova", "Orion", "Zephyr"],
+            "utilization_pct": [90.0, 50.0, 50.0, 10.0],
+        }
+    )
+    recs = evaluate_equalization(fleet, "cpu", deviation_threshold_pct=20)
+    assert len(recs) == 1
+    assert recs[0].overloaded_mac_id == "mac-01"
+    assert recs[0].underloaded_mac_id == "mac-04"
+    assert "mac-01" in recs[0].suggested_action
+    assert "mac-04" in recs[0].suggested_action
+    assert "wasted" not in recs[0].suggested_action.lower()
 
 
-def test_evaluate_network_spike_no_action_when_stable():
-    stable = pd.Series([30.0] * 20)
-    rec = evaluate_network_spike("network-02", stable)
-    assert rec.recommendation_type == RecommendationType.NO_ACTION
+def test_evaluate_equalization_no_recommendations_when_balanced():
+    fleet = pd.DataFrame(
+        {
+            "mac_id": ["mac-01", "mac-02", "mac-03"],
+            "project_name": ["Atlas", "Nova", "Orion"],
+            "utilization_pct": [48.0, 50.0, 52.0],
+        }
+    )
+    recs = evaluate_equalization(fleet, "ram", deviation_threshold_pct=20)
+    assert recs == []
+
+
+def test_evaluate_equalization_handles_empty_fleet():
+    recs = evaluate_equalization(pd.DataFrame(columns=["mac_id", "project_name", "utilization_pct"]), "cpu")
+    assert recs == []
+
+
+def test_evaluate_equalization_risk_escalates_with_larger_gap():
+    fleet = pd.DataFrame(
+        {
+            "mac_id": ["mac-01", "mac-02"],
+            "project_name": ["Atlas", "Nova"],
+            "utilization_pct": [95.0, 5.0],
+        }
+    )
+    recs = evaluate_equalization(fleet, "disk", deviation_threshold_pct=20)
+    assert recs[0].risk_level == RiskLevel.CRITICAL

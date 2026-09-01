@@ -7,23 +7,25 @@ from src.data_generation.scenario_seeder import (
 
 def test_capacity_shortfall_breaches_critical_threshold():
     df = seed_capacity_shortfall()
-    assert df["disk_utilization_pct"].max() >= 90
+    assert df["utilization_pct"].max() >= 90
+    assert (df["resource_type"] == "disk").all()
 
 
 def test_chronic_waste_stays_below_underutilization_threshold():
     df = seed_chronic_waste()
-    assert df["cpu_utilization_pct"].mean() < 30
+    assert df["utilization_pct"].mean() < 30
+    assert set(df["resource_type"].unique()) == {"cpu", "ram", "disk"}
 
 
 def test_seasonal_spike_has_a_spike_window():
     df = seed_seasonal_spike()
-    bandwidth = df["bandwidth_mbps"].iloc[0]
-    throughput_pct = df["throughput_mbps"] / bandwidth * 100
-    baseline = throughput_pct.iloc[:24].mean()
-    assert throughput_pct.max() > baseline + 40
+    baseline = df["utilization_pct"].iloc[:24].mean()
+    assert df["utilization_pct"].max() > baseline + 40
+    assert (df["resource_type"] == "cpu").all()
 
 
 def test_seeded_scenarios_have_required_columns():
-    assert {"timestamp", "storage_id", "disk_utilization_pct"}.issubset(seed_capacity_shortfall().columns)
-    assert {"timestamp", "cluster_id", "cpu_utilization_pct"}.issubset(seed_chronic_waste().columns)
-    assert {"timestamp", "link_id", "throughput_mbps"}.issubset(seed_seasonal_spike().columns)
+    required = {"timestamp", "mac_id", "project_name", "resource_type", "utilization_pct"}
+    assert required.issubset(seed_capacity_shortfall().columns)
+    assert required.issubset(seed_chronic_waste().columns)
+    assert required.issubset(seed_seasonal_spike().columns)
