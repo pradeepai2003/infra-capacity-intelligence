@@ -25,7 +25,7 @@ paths:
   seeded_scenarios_dir: "data/seeded_scenarios"
   powerbi_export_dir: "src/powerbi"
   snapshot_dir: "runs"
-  onedrive_dir: ""
+  onedrive_dir: "C:\Users\pradeep.kumar\OneDrive\pSiddhi3.0"
   test_report_file: "test-report.txt"
   coverage_xml_file: "coverage.xml"
 
