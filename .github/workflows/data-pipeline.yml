@@ -52,13 +52,15 @@ jobs:
         id: snapshot
         run: |
           FOLDER=$(ls -d "runs/S3-P-07 - "* | tail -n 1)
+          FOLDER_NAME=$(basename "$FOLDER")
           echo "folder=$FOLDER" >> "$GITHUB_OUTPUT"
-          echo "Snapshot folder: $FOLDER"
+          echo "folder_name=$FOLDER_NAME" >> "$GITHUB_OUTPUT"
+          echo "Snapshot folder: $FOLDER (artifact name: $FOLDER_NAME)"
 
       - name: Upload dated snapshot (data + test report) as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.snapshot.outputs.folder }}
+          name: ${{ steps.snapshot.outputs.folder_name }}
           path: ${{ steps.snapshot.outputs.folder }}
           retention-days: 30
 
