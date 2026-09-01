@@ -1,10 +1,22 @@
+topic_id: "S3-P-07"
+
 data_generation:
   start_date: "2025-01-01"
   num_days: 365
-  num_compute_clusters: 5
-  num_storage_systems: 4
-  num_network_links: 3
+  num_macs: 8
+  resource_types: ["cpu", "ram", "disk"]
   random_seed: 42
+  # Synthetic project each Mac is primarily running -- used for narrative context
+  # in recommendations (e.g. "Mac-03, running Project Falcon, is over-allocated").
+  project_pool:
+    - "Project Atlas"
+    - "Project Nova"
+    - "Project Orion"
+    - "Project Zephyr"
+    - "Project Falcon"
+    - "Project Comet"
+    - "Project Vega"
+    - "Project Lumen"
 
 paths:
   raw_data_dir: "data/raw"
@@ -12,24 +24,10 @@ paths:
   processed_data_dir: "data/processed"
   seeded_scenarios_dir: "data/seeded_scenarios"
   powerbi_export_dir: "src/powerbi"
-  # Where dated run snapshots are written (bundles this run's raw/processed/
-  # powerbi data + test report into one folder named "S3-P-07 - <date>").
   snapshot_dir: "runs"
-  # Optional: absolute path to a OneDrive-synced folder on THIS machine.
-  # Leave blank in CI (cloud runners have no OneDrive access) -- only set
-  # this when running locally, e.g. on Windows:
-  #   onedrive_dir: "C:/Users/pradeep.kumar/OneDrive/pSiddhi3.0"
-  # When set, the same dated snapshot is also copied there, and your local
-  # OneDrive desktop client syncs it to the cloud automatically -- no API
-  # keys or Azure app registration needed.
-  onedrive_dir: "C:/Users/pradeep.kumar/OneDrive/pSiddhi3.0"
-  # Where the CI-generated test report/coverage files live, if present
-  # (produced by a separate `pytest ... > test-report.txt` step). Snapshot
-  # creation looks here and includes them if found; skipped otherwise.
+  onedrive_dir: ""
   test_report_file: "test-report.txt"
   coverage_xml_file: "coverage.xml"
-
-topic_id: "S3-P-07"
 
 forecasting:
   horizons_weeks: [4, 12]
@@ -38,14 +36,16 @@ forecasting:
     - prophet
 
 thresholds:
-  storage_utilization_critical_pct: 90
-  storage_utilization_warning_pct: 75
-  compute_underutilization_pct: 30
-  compute_overutilization_pct: 85
-  network_latency_warning_ms: 150
+  # Per-Mac, per-resource-type thresholds (a Mac is "overloaded" on a resource
+  # above this, "underloaded"/over-allocated below this)
+  overloaded_utilization_pct: 85
+  underloaded_utilization_pct: 30
+  # How far a Mac's utilization can deviate from the 8-Mac fleet average
+  # (for a given resource type) before it's flagged for rebalancing
+  equalization_deviation_pct: 20
 
 recommendation_engine:
-  provider: "gemini" # options: gemini, ollama, template_fallback
+  provider: "gemini"
   gemini_model: "gemini-1.5-flash"
   ollama_model: "llama3"
   ollama_host: "http://localhost:11434"
