@@ -1,4 +1,4 @@
-cresource_type,risk_level,count
+resource_type,risk_level,count
 cpu,critical,3
 cpu,info,3
 cpu,warning,2
