@@ -122,3 +122,54 @@ def test_run_executes_full_pipeline_end_to_end(small_cfg, monkeypatch):
     expected_folder = f"S3-P-07 - {datetime.now().strftime('%Y-%m-%d')}"
     assert os.path.isdir(os.path.join(snapshot_dir, expected_folder))
     assert os.path.exists(os.path.join(snapshot_dir, expected_folder, "powerbi", "recommendations.csv"))
+
+
+def test_dotenv_is_loaded_on_module_import(tmp_path, monkeypatch):
+    """Confirms a local .env file is actually picked up (not just documented) --
+    writes a temp .env, points the working directory at it, and checks the
+    variable becomes visible via os.getenv() after reloading the module.
+    """
+    import importlib
+    import os
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("TEST_DOTENV_MARKER=hello_from_dotenv\n")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TEST_DOTENV_MARKER", raising=False)
+
+    import src.pipeline.run_pipeline as pipeline_module
+
+    importlib.reload(pipeline_module)
+
+    assert os.getenv("TEST_DOTENV_MARKER") == "hello_from_dotenv"
+
+
+def test_generate_narratives_with_pacing_sleeps_between_gemini_calls(monkeypatch):
+    import src.pipeline.run_pipeline as pipeline_module
+
+    sleep_calls = []
+    monkeypatch.setattr(pipeline_module.time, "sleep", lambda s: sleep_calls.append(s))
+
+    def fake_generator(item, provider):
+        return f"narrative-for-{item}"
+
+    result = pipeline_module._generate_narratives_with_pacing(["a", "b", "c"], fake_generator, "gemini")
+
+    assert result == ["narrative-for-a", "narrative-for-b", "narrative-for-c"]
+    assert len(sleep_calls) == 2  # paced between items, not after the last one
+
+
+def test_generate_narratives_with_pacing_skips_sleep_for_non_gemini_provider(monkeypatch):
+    import src.pipeline.run_pipeline as pipeline_module
+
+    sleep_calls = []
+    monkeypatch.setattr(pipeline_module.time, "sleep", lambda s: sleep_calls.append(s))
+
+    def fake_generator(item, provider):
+        return f"narrative-for-{item}"
+
+    result = pipeline_module._generate_narratives_with_pacing(["a", "b"], fake_generator, "template_fallback")
+
+    assert result == ["narrative-for-a", "narrative-for-b"]
+    assert sleep_calls == []

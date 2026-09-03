@@ -5,6 +5,7 @@ prophet>=1.1.5
 pyyaml>=6.0.1
 requests>=2.31.0
 azure-functions>=1.20.0
+python-dotenv>=1.0.0
 
 # Pinned as exact versions previously; switched to minimum-version bounds
 # (">=") so pip resolves whichever release actually has a prebuilt wheel

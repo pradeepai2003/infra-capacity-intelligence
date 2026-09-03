@@ -20,19 +20,32 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import time
 
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 
 from src.data_generation.generate_mac_allocation_metrics import generate_mac_allocation_metrics
 from src.data_generation.scenario_seeder import generate_all_scenarios
 from src.pipeline.io_utils import save_and_log
 from src.pipeline.snapshot import create_dated_snapshot
 from src.powerbi.dataset_export import export_for_powerbi
-from src.recommendation_engine.ai_narrative_generator import generate_equalization_narrative, generate_narrative
+from src.recommendation_engine.ai_narrative_generator import (
+    GEMINI_PACING_SECONDS,
+    generate_equalization_narrative,
+    generate_narrative,
+)
 from src.recommendation_engine.recommendation_schema import equalization_to_dataframe, recommendations_to_dataframe
 from src.recommendation_engine.rule_engine import evaluate_equalization, evaluate_mac_resource
 from src.forecasting.forecast_runner import run_forecast_for_all
+
+# Loads variables from a local .env file (if present) into the process
+# environment, so GEMINI_API_KEY / OLLAMA_HOST / etc. from config/.env.example
+# work automatically without manually exporting them in every shell session.
+# Safe no-op if no .env file exists (e.g. in CI, where secrets are injected
+# directly as real environment variables instead).
+load_dotenv()
 
 # Notebook-style modules are prefixed with digits (01_, 02_, ...) to preserve
 # their execution order when browsed in Databricks/VS Code. Python identifiers
@@ -57,6 +70,20 @@ def load_config(path: str = "config/config.yaml") -> dict:
 
 def _banner(step_text: str) -> None:
     logger.info("\n%s\n%s\n%s", "=" * 70, step_text, "=" * 70)
+
+
+def _generate_narratives_with_pacing(items: list, generator_fn, provider: str) -> list[str]:
+    """Calls generator_fn(item, provider=provider) for each item, pacing calls
+    when using Gemini so a batch of 20-30 recommendations doesn't immediately
+    trigger the free tier's requests-per-minute rate limit. No pacing needed
+    for Ollama (local) or the template fallback (no network call at all).
+    """
+    narratives = []
+    for i, item in enumerate(items):
+        narratives.append(generator_fn(item, provider=provider))
+        if provider == "gemini" and i < len(items) - 1:
+            time.sleep(GEMINI_PACING_SECONDS)
+    return narratives
 
 
 def step_generate_data(cfg: dict) -> pd.DataFrame:
@@ -137,7 +164,7 @@ def step_recommend(trends: pd.DataFrame, forecasts: dict, cfg: dict) -> tuple[pd
 
     recommendations_df = recommendations_to_dataframe(per_mac_recs)
     logger.info("[AI NARRATIVE] generating narratives for %d recommendations via '%s'...", len(per_mac_recs), provider)
-    recommendations_df["ai_narrative"] = [generate_narrative(r, provider=provider) for r in per_mac_recs]
+    recommendations_df["ai_narrative"] = _generate_narratives_with_pacing(per_mac_recs, generate_narrative, provider)
 
     processed_dir = cfg["paths"]["processed_data_dir"]
     save_and_log(recommendations_df, f"{processed_dir}/recommendations.csv", "Per-Mac recommendations")
@@ -153,9 +180,9 @@ def step_recommend(trends: pd.DataFrame, forecasts: dict, cfg: dict) -> tuple[pd
 
     equalization_df = equalization_to_dataframe(equalization_recs)
     if equalization_recs:
-        equalization_df["ai_narrative"] = [
-            generate_equalization_narrative(r, provider=provider) for r in equalization_recs
-        ]
+        equalization_df["ai_narrative"] = _generate_narratives_with_pacing(
+            equalization_recs, generate_equalization_narrative, provider
+        )
     else:
         equalization_df["ai_narrative"] = []
     save_and_log(equalization_df, f"{processed_dir}/equalization_summary.csv", "Fleet equalization recommendations")

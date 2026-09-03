@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 import requests
@@ -17,6 +18,11 @@ import requests
 from src.recommendation_engine.rule_engine import EqualizationRecommendation, Recommendation
 
 logger = logging.getLogger(__name__)
+
+# Google's free tier caps requests-per-minute for Gemini models. Pacing calls
+# at this interval keeps a batch of narratives well under that ceiling instead
+# of firing them all at once and immediately triggering 429s.
+GEMINI_PACING_SECONDS = 4.5
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 NARRATIVE_TEMPLATE_PATH = PROMPTS_DIR / "narrative_prompt_template.txt"
@@ -78,23 +84,54 @@ def _equalization_template_fallback(rec: EqualizationRecommendation) -> str:
     return rec.suggested_action
 
 
-def _call_gemini(prompt: str, model: str = "gemini-1.5-flash") -> str | None:
+def _call_gemini(prompt: str, model: str = "gemini-flash-latest", max_retries: int = 3) -> str | None:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return None
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        resp = requests.post(
-            url,
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Gemini call failed, falling back: %s", exc)
-        return None
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.post(
+                url,
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            # 429 (rate limit) and 503 (transient overload) are worth retrying;
+            # anything else (400/401/403/404) won't be fixed by waiting, so fail fast.
+            if status not in (429, 503) or attempt == max_retries:
+                logger.warning("Gemini call failed, falling back: %s", exc)
+                return None
+
+            retry_after = None
+            if exc.response is not None:
+                retry_after = exc.response.headers.get("Retry-After")
+            wait_seconds = float(retry_after) if retry_after else (2**attempt) * 2  # 2s, 4s, 8s
+            logger.warning(
+                "Gemini call hit %s, retrying in %.0fs (attempt %d/%d)...",
+                status,
+                wait_seconds,
+                attempt + 1,
+                max_retries,
+            )
+            time.sleep(wait_seconds)
+
+        except Exception as exc:  # noqa: BLE001 -- timeouts, connection errors, malformed responses, etc.
+            if attempt == max_retries:
+                logger.warning("Gemini call failed, falling back: %s", exc)
+                return None
+            wait_seconds = (2**attempt) * 2
+            logger.warning("Gemini call error (%s), retrying in %.0fs...", exc, wait_seconds)
+            time.sleep(wait_seconds)
+
+    return None  # pragma: no cover -- unreachable, loop always returns or raises above
 
 
 def _call_ollama(prompt: str, model: str = "llama3", host: str = "http://localhost:11434") -> str | None:
@@ -113,7 +150,7 @@ def _call_ollama(prompt: str, model: str = "llama3", host: str = "http://localho
 
 def _dispatch(prompt: str, provider: str) -> str | None:
     if provider == "gemini":
-        return _call_gemini(prompt, model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+        return _call_gemini(prompt, model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"))
     if provider == "ollama":
         return _call_ollama(
             prompt,

@@ -178,3 +178,77 @@ def test_generate_equalization_narratives_batch():
     assert results[0]["overloaded_mac_id"] == "mac-01"
     assert results[0]["underloaded_mac_id"] == "mac-05"
     assert "narrative" in results[0]
+
+
+@patch("src.recommendation_engine.ai_narrative_generator.time.sleep")
+@patch("src.recommendation_engine.ai_narrative_generator.requests.post")
+def test_call_gemini_retries_on_429_and_succeeds(mock_post, mock_sleep, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+
+    rate_limited = MagicMock()
+    rate_limited.raise_for_status.side_effect = __import__("requests").exceptions.HTTPError(
+        response=MagicMock(status_code=429, headers={})
+    )
+
+    success = MagicMock()
+    success.raise_for_status.return_value = None
+    success.json.return_value = {"candidates": [{"content": {"parts": [{"text": "Recovered after retry."}]}}]}
+
+    mock_post.side_effect = [rate_limited, success]
+
+    result = _call_gemini("some prompt")
+    assert result == "Recovered after retry."
+    assert mock_post.call_count == 2
+    mock_sleep.assert_called_once()
+
+
+@patch("src.recommendation_engine.ai_narrative_generator.time.sleep")
+@patch("src.recommendation_engine.ai_narrative_generator.requests.post")
+def test_call_gemini_respects_retry_after_header(mock_post, mock_sleep, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    import requests as real_requests
+
+    rate_limited = MagicMock()
+    rate_limited.raise_for_status.side_effect = real_requests.exceptions.HTTPError(
+        response=MagicMock(status_code=429, headers={"Retry-After": "10"})
+    )
+    success = MagicMock()
+    success.raise_for_status.return_value = None
+    success.json.return_value = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+    mock_post.side_effect = [rate_limited, success]
+
+    _call_gemini("some prompt")
+    mock_sleep.assert_called_once_with(10.0)
+
+
+@patch("src.recommendation_engine.ai_narrative_generator.time.sleep")
+@patch("src.recommendation_engine.ai_narrative_generator.requests.post")
+def test_call_gemini_gives_up_after_max_retries(mock_post, mock_sleep, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    import requests as real_requests
+
+    always_503 = MagicMock()
+    always_503.raise_for_status.side_effect = real_requests.exceptions.HTTPError(
+        response=MagicMock(status_code=503, headers={})
+    )
+    mock_post.return_value = always_503
+
+    result = _call_gemini("some prompt", max_retries=2)
+    assert result is None
+    assert mock_post.call_count == 3  # initial attempt + 2 retries
+
+
+@patch("src.recommendation_engine.ai_narrative_generator.requests.post")
+def test_call_gemini_does_not_retry_non_retryable_errors(mock_post, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    import requests as real_requests
+
+    not_found = MagicMock()
+    not_found.raise_for_status.side_effect = real_requests.exceptions.HTTPError(
+        response=MagicMock(status_code=404, headers={})
+    )
+    mock_post.return_value = not_found
+
+    result = _call_gemini("some prompt", max_retries=3)
+    assert result is None
+    assert mock_post.call_count == 1  # fails fast, no retry for a 404
